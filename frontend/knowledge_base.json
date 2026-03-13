@@ -1,0 +1,17 @@
+[
+  {
+    "question": "Wie kann ich einen Termin vereinbaren?",
+    "answer": "Ich sende dir einen Calendly-Link. Sag mir kurz das Thema und ob du lieber vormittags oder nachmittags Zeit hast.",
+    "tags": ["termine", "calendly"]
+  },
+  {
+    "question": "Wie läuft eine Angebotsanfrage ab?",
+    "answer": "Ich sammle die wichtigsten Eckdaten (Thema, Anforderungen, Deadline, Budgetrahmen) und lege eine Angebotsanfrage an. Danach melden wir uns mit Rückfragen oder einem Angebot.",
+    "tags": ["angebot", "anfrage"]
+  },
+  {
+    "question": "Welche Infos braucht ihr für ein Angebot?",
+    "answer": "Typischerweise: Ziel/Problem, gewünschte Leistung, Umfang/Features, Timeline/Deadline, Budgetrahmen, Ansprechpartner und bevorzugter Kommunikationskanal.",
+    "tags": ["angebot", "requirements"]
+  }
+]

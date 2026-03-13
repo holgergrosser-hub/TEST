@@ -15,13 +15,290 @@
 """Tools module for the customer service agent."""
 
 import logging
+import os
+import re
 import uuid
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
+from difflib import SequenceMatcher
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlencode, urlparse, urlunparse, parse_qsl
+
+import json
 
 logger = logging.getLogger(__name__)
 
 MAX_DISCOUNT_RATE = 10
 MAX_FIXED_RATE = 20
+
+
+@dataclass(frozen=True)
+class QuoteRequest:
+    request_id: str
+    created_at: str
+    name: str
+    contact: str
+    company: str | None
+    topic: str
+    details: str
+    preferred_contact_method: str | None
+    budget: str | None
+
+
+def _workspace_file_from_env(env_var: str, default_relative_path: str) -> Path:
+    configured = os.getenv(env_var)
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return (Path(__file__).resolve().parent.parent / default_relative_path).resolve()
+
+
+def _safe_contact_hint(contact: str) -> str:
+    contact = (contact or "").strip()
+    if not contact:
+        return ""
+    if "@" in contact:
+        user, _, domain = contact.partition("@")
+        if len(user) <= 2:
+            masked = "*" * len(user)
+        else:
+            masked = f"{user[:1]}***{user[-1:]}"
+        return f"{masked}@{domain}"
+    digits = re.sub(r"\D+", "", contact)
+    if len(digits) >= 4:
+        return f"***{digits[-4:]}"
+    return "***"
+
+
+def send_calendly_link(contact: str, topic: str | None = None) -> dict:
+    """Return (and optionally 'send') a Calendly scheduling link.
+
+    This is a mocked tool by default: it returns the link to share with the user.
+
+    Configuration:
+      - CALENDLY_BASE_URL: e.g. https://calendly.com/your-org/intro-call
+
+    Args:
+        contact: Email or phone number of the user (used only for link hints; not stored).
+        topic: Optional topic for the meeting.
+
+    Returns:
+        dict with status and the scheduling URL.
+    """
+
+    base_url = os.getenv("CALENDLY_BASE_URL", "").strip()
+    if not base_url:
+        return {
+            "status": "error",
+            "message": "CALENDLY_BASE_URL is not configured.",
+        }
+
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"}:
+        return {
+            "status": "error",
+            "message": "CALENDLY_BASE_URL must start with http:// or https://",
+        }
+
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    if topic:
+        query.setdefault("utm_content", topic)
+    query.setdefault("utm_source", "adk_agent")
+
+    scheduling_url = urlunparse(
+        parsed._replace(query=urlencode(query, doseq=True))
+    )
+
+    logger.info(
+        "Providing Calendly link for contact_hint=%s topic=%s",
+        _safe_contact_hint(contact),
+        topic,
+    )
+    return {
+        "status": "success",
+        "message": "Calendly link ready to share.",
+        "scheduling_url": scheduling_url,
+    }
+
+
+def send_offer_request_link(contact: str | None = None, topic: str | None = None) -> dict:
+    """Return a link to the user's online offer request form.
+
+    Configuration:
+      - OFFER_REQUEST_URL: e.g. https://angebot.example.com/
+
+    Args:
+        contact: Optional email/phone hint (not stored).
+        topic: Optional topic to include as tracking info.
+
+    Returns:
+        dict with status and the URL.
+    """
+
+    base_url = os.getenv("OFFER_REQUEST_URL", "").strip()
+    if not base_url:
+        return {
+            "status": "error",
+            "message": "OFFER_REQUEST_URL is not configured.",
+        }
+
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"}:
+        return {
+            "status": "error",
+            "message": "OFFER_REQUEST_URL must start with http:// or https://",
+        }
+
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    if topic:
+        query.setdefault("topic", topic)
+    query.setdefault("utm_source", "adk_agent")
+
+    offer_url = urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
+    logger.info(
+        "Providing offer request link for contact_hint=%s topic=%s",
+        _safe_contact_hint(contact or ""),
+        topic,
+    )
+    return {
+        "status": "success",
+        "message": "Offer request link ready to share.",
+        "offer_request_url": offer_url,
+    }
+
+
+def create_quote_request(
+    name: str,
+    contact: str,
+    topic: str,
+    details: str,
+    company: str | None = None,
+    preferred_contact_method: str | None = None,
+    budget: str | None = None,
+) -> dict:
+    """Create an offer/quote request (mock).
+
+    Stores the request locally as JSONL so it can be processed later.
+
+    Configuration:
+      - QUOTE_REQUESTS_PATH: optional absolute path for storage.
+        Defaults to customer_service/data/quote_requests.jsonl
+
+    Returns:
+        dict with status and request metadata.
+    """
+
+    storage_path = _workspace_file_from_env(
+        "QUOTE_REQUESTS_PATH", "data/quote_requests.jsonl"
+    )
+    storage_path.parent.mkdir(parents=True, exist_ok=True)
+
+    request = QuoteRequest(
+        request_id=str(uuid.uuid4()),
+        created_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        name=name.strip(),
+        contact=contact.strip(),
+        company=(company.strip() if company else None),
+        topic=topic.strip(),
+        details=details.strip(),
+        preferred_contact_method=(
+            preferred_contact_method.strip()
+            if preferred_contact_method
+            else None
+        ),
+        budget=(budget.strip() if budget else None),
+    )
+
+    with storage_path.open("a", encoding="utf-8") as file_handle:
+        file_handle.write(json.dumps(asdict(request), ensure_ascii=False) + "\n")
+
+    logger.info(
+        "Created quote request %s for contact_hint=%s topic=%s",
+        request.request_id,
+        _safe_contact_hint(request.contact),
+        request.topic,
+    )
+    return {
+        "status": "success",
+        "request_id": request.request_id,
+        "created_at": request.created_at,
+        "storage": str(storage_path),
+    }
+
+
+def search_knowledge_base(query: str, top_k: int = 3) -> dict:
+    """Search a simple local knowledge base for answers.
+
+    The KB is a JSON file with a list of entries like:
+      {"question": "...", "answer": "...", "tags": ["..."]}
+
+    Configuration:
+      - KNOWLEDGE_BASE_PATH: optional absolute path.
+        Defaults to customer_service/data/knowledge_base.json
+    """
+
+    kb_path = _workspace_file_from_env(
+        "KNOWLEDGE_BASE_PATH", "data/knowledge_base.json"
+    )
+    if not kb_path.exists():
+        return {
+            "status": "error",
+            "message": "Knowledge base file not found.",
+            "knowledge_base_path": str(kb_path),
+        }
+
+    try:
+        kb_data: Any
+        with kb_path.open("r", encoding="utf-8") as file_handle:
+            kb_data = json.load(file_handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "status": "error",
+            "message": f"Failed to read knowledge base: {exc}",
+            "knowledge_base_path": str(kb_path),
+        }
+
+    if not isinstance(kb_data, list):
+        return {
+            "status": "error",
+            "message": "Knowledge base must be a JSON list of entries.",
+            "knowledge_base_path": str(kb_path),
+        }
+
+    normalized_query = (query or "").strip().lower()
+    if not normalized_query:
+        return {"status": "error", "message": "query is required"}
+
+    scored: list[dict[str, Any]] = []
+    for entry in kb_data:
+        if not isinstance(entry, dict):
+            continue
+        question = str(entry.get("question", ""))
+        answer = str(entry.get("answer", ""))
+        tags = entry.get("tags", [])
+
+        haystack = " ".join(
+            [question, answer, " ".join(tags) if isinstance(tags, list) else ""]
+        ).lower()
+        ratio = SequenceMatcher(None, normalized_query, haystack).ratio()
+        if normalized_query in haystack:
+            ratio = max(ratio, 0.95)
+
+        scored.append(
+            {
+                "score": round(ratio, 3),
+                "question": question,
+                "answer": answer,
+                "tags": tags if isinstance(tags, list) else [],
+            }
+        )
+
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return {
+        "status": "success",
+        "knowledge_base_path": str(kb_path),
+        "matches": scored[: max(1, int(top_k))],
+    }
 
 
 def send_call_companion_link(phone_number: str) -> str:

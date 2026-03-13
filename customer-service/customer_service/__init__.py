@@ -15,12 +15,31 @@
 """Includes all shared libraries for the agent."""
 
 import os
+from pathlib import Path
 
 import google.auth
+from google.auth.exceptions import DefaultCredentialsError
+
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover
+    load_dotenv = None
 
 from . import agent
 
-_, project_id = google.auth.default()
-os.environ.setdefault("GOOGLE_CLOUD_PROJECT", project_id)
-os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
+if load_dotenv:
+    load_dotenv(
+        dotenv_path=Path(__file__).resolve().parent.parent / ".env",
+        override=False,
+    )
+
+try:
+    _, project_id = google.auth.default()
+except DefaultCredentialsError:
+    project_id = None
+
+if project_id:
+    os.environ.setdefault("GOOGLE_CLOUD_PROJECT", project_id)
+
+os.environ.setdefault("GOOGLE_CLOUD_LOCATION", "global")
 os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "True")

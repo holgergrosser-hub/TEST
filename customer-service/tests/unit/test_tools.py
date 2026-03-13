@@ -19,13 +19,17 @@ from customer_service.tools.tools import (
     access_cart_information,
     approve_discount,
     check_product_availability,
+    create_quote_request,
     generate_qr_code,
     get_available_planting_times,
     get_product_recommendations,
     modify_cart,
     schedule_planting_service,
+    search_knowledge_base,
+    send_calendly_link,
     send_call_companion_link,
     send_care_instructions,
+    send_offer_request_link,
     update_salesforce_crm,
 )
 
@@ -193,3 +197,65 @@ def test_generate_qr_code():
     assert "expiration_date" in result
     expiration_date = datetime.now() + timedelta(days=expiration_days)
     assert result["expiration_date"] == expiration_date.strftime("%Y-%m-%d")
+
+
+def test_send_calendly_link_missing_env(monkeypatch):
+    monkeypatch.delenv("CALENDLY_BASE_URL", raising=False)
+    result = send_calendly_link(contact="test@example.com", topic="intro")
+    assert result["status"] == "error"
+
+
+def test_send_calendly_link_ok(monkeypatch):
+    monkeypatch.setenv(
+        "CALENDLY_BASE_URL", "https://calendly.com/acme/intro-call"
+    )
+    result = send_calendly_link(contact="test@example.com", topic="intro")
+    assert result["status"] == "success"
+    assert "calendly.com" in result["scheduling_url"]
+    assert "utm_source=adk_agent" in result["scheduling_url"]
+
+
+def test_create_quote_request_writes_jsonl(tmp_path, monkeypatch):
+    storage_path = tmp_path / "quote_requests.jsonl"
+    monkeypatch.setenv("QUOTE_REQUESTS_PATH", str(storage_path))
+    result = create_quote_request(
+        name="Max Mustermann",
+        contact="max@example.com",
+        company="Example GmbH",
+        topic="Website Projekt",
+        details="Landingpage + Kontaktformular",
+        preferred_contact_method="email",
+        budget="5k-10k",
+    )
+    assert result["status"] == "success"
+    assert storage_path.exists()
+    lines = storage_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    assert result["request_id"]
+
+
+def test_search_knowledge_base_ok(tmp_path, monkeypatch):
+    kb_path = tmp_path / "kb.json"
+    kb_path.write_text(
+        '[{"question":"Wie vereinbare ich einen Termin?","answer":"Nutze den Calendly-Link.","tags":["termine"]}]',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("KNOWLEDGE_BASE_PATH", str(kb_path))
+    result = search_knowledge_base("Termin", top_k=1)
+    assert result["status"] == "success"
+    assert len(result["matches"]) == 1
+    assert "Calendly" in result["matches"][0]["answer"]
+
+
+def test_send_offer_request_link_missing_env(monkeypatch):
+    monkeypatch.delenv("OFFER_REQUEST_URL", raising=False)
+    result = send_offer_request_link(contact="test@example.com", topic="QM")
+    assert result["status"] == "error"
+
+
+def test_send_offer_request_link_ok(monkeypatch):
+    monkeypatch.setenv("OFFER_REQUEST_URL", "https://angebot.qmberater.info/")
+    result = send_offer_request_link(contact="test@example.com", topic="QM")
+    assert result["status"] == "success"
+    assert "angebot.qmberater.info" in result["offer_request_url"]
+    assert "utm_source=adk_agent" in result["offer_request_url"]
