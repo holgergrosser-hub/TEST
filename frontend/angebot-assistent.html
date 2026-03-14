@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Angebots‑Assistent · QMberater</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; line-height: 1.4; }
+      .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; max-width: 860px; }
+      h1 { margin: 0 0 12px; }
+      .muted { color: #555; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
+      .pkg { border: 1px solid #ccc; border-radius: 10px; padding: 12px; cursor: pointer; min-width: 240px; }
+      .pkg.selected { border-color: #111; }
+      .pkg .price { font-weight: 700; }
+      label { display: block; font-size: 13px; color: #333; margin-top: 10px; }
+      input, textarea { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #bbb; }
+      textarea { min-height: 80px; }
+      button { padding: 10px 14px; border-radius: 8px; border: 1px solid #222; background: #fff; cursor: pointer; }
+      button:hover { background: #f5f5f5; }
+      button[disabled] { opacity: 0.6; cursor: not-allowed; }
+      .error { border: 1px solid #f1b0b7; background: #fff5f5; padding: 10px 12px; border-radius: 8px; color: #842029; display: none; }
+      .success { border: 1px solid #b7ebc6; background: #f3fff6; padding: 12px; border-radius: 8px; display: none; }
+      a { color: #0b57d0; }
+      .small { font-size: 12px; }
+      .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      @media (max-width: 720px) { .two { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Angebots‑Assistent (ISO 9001)</h1>
+      <div class="muted">Erfasst die Pflichtfelder und sendet die Anfrage automatisch. Du bekommst das Angebot als PDF per E‑Mail.</div>
+
+      <div class="row">
+        <a class="small" href="/">← Zurück</a>
+        <a class="small" href="https://angebot.qmberater.info/" target="_blank" rel="noreferrer">Original‑Formular öffnen</a>
+      </div>
+
+      <h2>1) Paket wählen</h2>
+      <div class="row" id="pkgs"></div>
+
+      <h2>2) Kontaktdaten</h2>
+      <div class="error" id="error"></div>
+
+      <div class="two">
+        <div>
+          <label for="firma">Firmenname *</label>
+          <input id="firma" autocomplete="organization" placeholder="z. B. Müller GmbH" />
+        </div>
+        <div>
+          <label for="ansprechpartner">Ansprechpartner *</label>
+          <input id="ansprechpartner" autocomplete="name" placeholder="z. B. Max Müller" />
+        </div>
+      </div>
+
+      <div class="two">
+        <div>
+          <label for="email">E‑Mail *</label>
+          <input id="email" type="email" autocomplete="email" placeholder="max@firma.de" />
+        </div>
+        <div>
+          <label for="telefon">Telefon (optional)</label>
+          <input id="telefon" autocomplete="tel" placeholder="+49 …" />
+        </div>
+      </div>
+
+      <label for="notiz">Notiz (optional)</label>
+      <textarea id="notiz" placeholder="Optional: kurze Zusatzinfo (z. B. Standorte, Branche, Deadline)"></textarea>
+
+      <div class="row">
+        <button id="submit">Jetzt Angebot anfordern</button>
+        <span id="status" class="muted small"></span>
+      </div>
+
+      <div class="success" id="success">
+        <strong>Erfolgreich versendet.</strong>
+        <div class="small">Bitte prüfe dein E‑Mail‑Postfach (ggf. Spam‑Ordner).</div>
+      </div>
+
+      <div class="muted small" style="margin-top: 14px;">
+        Technischer Hinweis: Die Anfrage wird an denselben Versand‑Endpoint gesendet wie das Original‑Formular.
+      </div>
+    </div>
+
+    <script>
+      // Versand-Endpoint aus dem Original-Formular (Google Apps Script)
+      const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzJan8Xcebhr2upSMgLVcowOzGcffH90hMTvV4ebfmmwkvXPadSoK-erUKW5NeP83vs/exec';
+
+      const packages = [
+        { key: 'klein', label: 'Kleinbetrieb', sub: 'Selbstständig oder bis 2 Mitarbeiter', price: 3500, hours: '20-30', submitName: 'Kleinbetriebe' },
+        { key: 'mittel', label: 'Mittlerer Betrieb', sub: '3–10 Mitarbeiter', price: 4500, hours: '30-40', submitName: 'Mittlere Betriebe' },
+        { key: 'gross', label: 'Mittelstand', sub: '11–50 Mitarbeiter', price: 7500, hours: '40-70', submitName: 'Mittelständische Unternehmen' }
+      ];
+
+      let selected = packages[1];
+
+      function el(id) { return document.getElementById(id); }
+
+      function showError(msg) {
+        const box = el('error');
+        box.textContent = msg;
+        box.style.display = 'block';
+      }
+
+      function clearError() {
+        const box = el('error');
+        box.textContent = '';
+        box.style.display = 'none';
+      }
+
+      function renderPackages() {
+        const wrap = el('pkgs');
+        wrap.innerHTML = '';
+        for (const p of packages) {
+          const d = document.createElement('div');
+          d.className = 'pkg' + (p.key === selected.key ? ' selected' : '');
+          d.innerHTML = `
+            <div><strong>${p.label}</strong></div>
+            <div class="muted small">${p.sub}</div>
+            <div class="price" style="margin-top:6px;">${p.price.toLocaleString('de-DE')} € netto</div>
+          `;
+          d.addEventListener('click', () => {
+            selected = p;
+            renderPackages();
+            clearError();
+          });
+          wrap.appendChild(d);
+        }
+      }
+
+      async function postToScript(params) {
+        try {
+          const r = await fetch(SCRIPT_URL, {
+            method: 'POST',
+            mode: 'cors',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+            body: params.toString()
+          });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return true;
+        } catch (_) {
+          // fallback ähnlich wie Original
+          await fetch(SCRIPT_URL, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+            body: params.toString()
+          });
+          return true;
+        }
+      }
+
+      async function submit() {
+        clearError();
+        el('success').style.display = 'none';
+
+        const firma = (el('firma').value || '').trim();
+        const ansprechpartner = (el('ansprechpartner').value || '').trim();
+        const email = (el('email').value || '').trim();
+        const telefon = (el('telefon').value || '').trim();
+        const notiz = (el('notiz').value || '').trim();
+
+        if (!firma || !ansprechpartner || !email) {
+          showError('Bitte fülle alle Pflichtfelder aus (Firma, Ansprechpartner, E‑Mail).');
+          return;
+        }
+
+        const btn = el('submit');
+        btn.disabled = true;
+        el('status').textContent = 'Wird versendet…';
+
+        try {
+          const p = new URLSearchParams();
+          p.append('paket', selected.submitName);
+          p.append('firma', firma);
+          p.append('ansprechpartner', ansprechpartner);
+          p.append('email', email);
+          p.append('telefon', telefon || 'nicht angegeben');
+
+          p.append('norm', 'ISO 9001:2015');
+          p.append('norms', 'ISO 9001:2015');
+          p.append('normCount', '1');
+          p.append('normInfo', '1 Norm');
+
+          p.append('preis', String(selected.price));
+          p.append('kosten', String(selected.price));
+          p.append('stunden', String(selected.hours || ''));
+
+          p.append('geltungsbereich', 'Nach Vereinbarung');
+          p.append('fragen', notiz || 'keine');
+
+          await postToScript(p);
+
+          el('status').textContent = 'Versendet.';
+          el('success').style.display = 'block';
+        } catch (e) {
+          el('status').textContent = '';
+          showError('Fehler beim Versenden. Bitte versuche es erneut.');
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      ['firma','ansprechpartner','email','telefon','notiz'].forEach(id => {
+        el(id).addEventListener('input', clearError);
+      });
+
+      el('submit').addEventListener('click', submit);
+
+      renderPackages();
+    </script>
+  </body>
+</html>
