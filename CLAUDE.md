@@ -82,5 +82,3 @@ Gilt für jedes neue Tool, jede neue Seite, jede neue Skill und jede Auftragsart
 6. **Prüfen** – Deploy-Preview, Selbsttest, Landingpage-QS (Teil C) bzw. Prüfgate (Teil D).
 7. **Übergabe** – Preview-Link, Prüfliste für Holger, und ein kurzes Übergabeblatt mit vier Zeilen: Stand, getroffene Entscheidungen, nächster Schritt, offene Fragen. Das Übergabeblatt wird in die nächste Sitzung kopiert, wenn die Arbeit dort weitergeht.
 8. **Lernen** – Nach Abschluss eine kurze Retro: Was hat an Regeln, Skill-Beschreibungen oder Ablauf gefehlt? Erkenntnis als prüfbare Regel in die zuständige Skill oder in das Doc (Skill qm-lernzyklus).
-
-<!-- Testlauf -->
